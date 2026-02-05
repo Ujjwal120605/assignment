@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+adbutils
+google-generativeai
+python-multipart
+requests
+python-dotenv
+Pillow
+openai
+appium-python-client
