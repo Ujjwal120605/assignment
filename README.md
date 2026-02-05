@@ -12,17 +12,7 @@ Launch the ChatGPT app
 Type and submit the question
 Return execution results
 
-🏗️ Architecture
-User → Next.js Frontend → FastAPI Backend → AI Planner (LLM) → Executor (Appium/ADB) → Android Device
-Project Structure:
-├── app/              # Next.js frontend
-├── backend/          # FastAPI backend
-│   ├── agent/
-│   │   ├── planner.py    # AI command → action plan
-│   │   ├── executor.py   # Executes on device
-│   │   └── device.py     # Device detection
-│   └── main.py       # API server
-└── README.md
+
 🧠 How It Works
 1. AI Planner
 Converts natural language into structured action steps:
