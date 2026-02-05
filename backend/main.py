@@ -2,8 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import os
-from agent.planner import plan
-from agent.executor import execute
+# from agent.planner import plan  <-- Removed
+from executor import AgentEngine # Import our new class
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -18,6 +18,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global Agent Instance
+# Initialize it here so we connect once
+agent_engine = AgentEngine()
+
 class Command(BaseModel):
     command: str
 
@@ -28,14 +32,11 @@ def read_root():
 @app.post("/command")
 async def run_command(cmd: Command):
     try:
-        # Step 1: Plan
-        steps = plan(cmd.command)
-        
-        # Step 2: Execute
-        result = execute(steps)
+        # Run the agent with the user command
+        logs = agent_engine.run(cmd.command)
         
         return {
-            "message": f"Plan: {steps}\nResult: {result}"
+            "message": logs
         }
     except Exception as e:
         return {"message": f"Error: {str(e)}"}

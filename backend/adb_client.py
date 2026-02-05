@@ -1,9 +1,10 @@
 import adbutils
 from adbutils import AdbClient, AdbError
 import os
-import subprocess
-import base64
 import shutil
+import base64
+import time
+from xml_parser import XMLParser
 
 class ADBController:
     def __init__(self, host="127.0.0.1", port=5037):
@@ -35,27 +36,58 @@ class ADBController:
             if not devices:
                 return False, "No devices connected"
             
-            self.device = devices[0] # Pick the first device
+            # Prioritize real devices (exclude emulators)
+            target_device = devices[0]
+            for d in devices:
+                if not d.serial.startswith("emulator-"):
+                    target_device = d
+                    break
+            
+            self.device = target_device
             return True, f"Connected to {self.device.serial}"
         except Exception as e:
             return False, f"Error connecting to device: {str(e)}"
 
-    def take_screenshot(self):
-        if not self.device:
-            return None
+    def dump_screen(self):
+        """Dumps user UI xml and returns parsed elements."""
+        if not self.device: return []
         try:
-            # Get screenshot as PIL Image
-            image = self.device.screenshot()
+            # Dump XML to sdcard
+            self.device.shell("uiautomator dump /sdcard/window_dump.xml")
+            # Pull to memory (string)
+            xml_content = self.device.sync.read_text("/sdcard/window_dump.xml")
             
-            # Save to temporary buffer to get base64
-            from io import BytesIO
-            buffered = BytesIO()
-            image.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            return img_str
+            # DEBUG: Print XML stats
+            print(f"DEBUG: XML Content Length: {len(xml_content)}")
+            print(f"DEBUG: XML Snippet: {xml_content[:100]}")
+            
+            parser = XMLParser(xml_content)
+            elements = parser.find_elements()
+            print(f"DEBUG: Parsed {len(elements)} elements")
+            return elements
         except Exception as e:
-            print(f"Screenshot failed: {e}")
-            return None
+            print(f"Error dumping screen: {e}")
+            return []
+
+    def find_actionable_element(self, text):
+        """Finds an element by text and returns its center coordinates."""
+        elements = self.dump_screen()
+        for el in elements:
+            # Check text or content-desc
+            if (text.lower() in el['text'].lower()) or (text.lower() in el['content_desc'].lower()):
+                return el
+        return None
+
+    def tap_element(self, text):
+        """Finds element by text and taps it."""
+        el = self.find_actionable_element(text)
+        if el:
+            x, y = el['center']
+            print(f"Tapping '{text}' at ({x}, {y})")
+            self.tap(x, y)
+            return True
+        print(f"Element '{text}' not found.")
+        return False
 
     def tap(self, x, y):
         if not self.device: return
@@ -63,10 +95,13 @@ class ADBController:
 
     def type_text(self, text):
         if not self.device: return
-        # Create a basic implementation using shell input text
-        # Escape spaces and special chars if needed
-        escaped_text = text.replace(" ", "%s")
+        # Escape spaces and special chars
+        escaped_text = text.replace(" ", "%s").replace("'", r"\'")
         self.device.shell(f"input text '{escaped_text}'")
+
+    def press_enter(self):
+        if not self.device: return
+        self.device.keyevent("66") # ENTER
 
     def home(self):
         if not self.device: return
@@ -76,6 +111,7 @@ class ADBController:
         if not self.device: return
         self.device.keyevent("BACK")
 
-    def shell(self, cmd):
-        if not self.device: return None
-        return self.device.shell(cmd)
+    def open_app(self, package_name):
+        if not self.device: return
+        # Using monkey is often easier than finding the specific activity
+        self.device.shell(f"monkey -p {package_name} -c android.intent.category.LAUNCHER 1")

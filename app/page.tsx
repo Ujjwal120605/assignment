@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import Head from "next/head";
 
 export default function Home() {
   const [command, setCommand] = useState("");
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   async function runAgent(e: React.FormEvent) {
@@ -14,21 +14,49 @@ export default function Home() {
     if (!command.trim()) return;
 
     setLoading(true);
-    setResponse(""); // Clear previous
+    setResponse(null);
+
     try {
       const res = await fetch("http://localhost:8000/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command }),
       });
+
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
       const data = await res.json();
-      setResponse(data.message);
+      setResponse(data.message || "Command executed successfully");
     } catch (err) {
-      setResponse("Error: Could not connect to agent backend.");
+      setResponse(`Error: ${err instanceof Error ? err.message : "Connection failure. Make sure the backend is running on port 8000."}`);
     } finally {
       setLoading(false);
     }
   }
+
+  const startListening = () => {
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => setIsListening(true);
+      recognition.onend = () => setIsListening(false);
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setCommand(transcript);
+      };
+
+      recognition.start();
+    } else {
+      alert("Browser does not support speech recognition.");
+    }
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -37,106 +65,119 @@ export default function Home() {
   }, [response]);
 
   return (
-    <div className="flex flex-col h-screen max-w-4xl mx-auto p-4 md:p-8">
-      {/* Header */}
-      <header className="flex items-center justify-between mb-8 animate-fade-in">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" className="w-6 h-6">
-              <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13A2.5 2.5 0 1 0 5 15.5 2.5 2.5 0 0 0 7.5 13m9 0a2.5 2.5 0 1 0 2.5 2.5A2.5 2.5 0 0 0 16.5 13" />
-            </svg>
+    <div className="flex flex-col min-h-screen justify-center items-center bg-neutral-50 text-black p-4">
+      {/* Compact Swiss Card */}
+      <div className="w-full max-w-3xl border-2 border-black flex flex-col h-[85vh] shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
+
+        {/* Header */}
+        <header className="border-b-2 border-black p-6 flex justify-between items-center bg-white">
+          <h1 className="text-4xl font-bold tracking-tighter uppercase leading-none">
+            Assign AI
+          </h1>
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${loading ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-neutral-600">
+              {loading ? 'Thinking...' : 'System Ready'}
+            </span>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight text-white glow-text">ASSIGN AI</h1>
-            <p className="text-xs text-indigo-200 font-medium tracking-wide opacity-80">ANDROID AUTOMATION AGENT</p>
-          </div>
-        </div>
-        <div className="px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-          </span>
-          SYSTEM ONLINE
-        </div>
-      </header>
+        </header>
 
-      {/* Main Display - Terminal Style */}
-      <main className="flex-1 overflow-hidden flex flex-col gap-6 animate-fade-in" style={{ animationDelay: "0.1s" }}>
-
-        {/* Output Console */}
-        <div className="flex-1 glass-panel rounded-2xl p-6 overflow-y-auto font-mono text-sm relative" ref={scrollRef}>
-          <div className="absolute top-0 left-0 w-full h-8 bg-gradient-to-b from-slate-900/50 to-transparent pointer-events-none sticky z-10" />
-
+        {/* Console / Output */}
+        <main
+          className="flex-1 overflow-y-auto p-6 font-mono text-sm leading-relaxed bg-neutral-50 relative"
+          ref={scrollRef}
+        >
           {!response && !loading && (
-            <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4">
-              <div className="w-16 h-16 rounded-full bg-slate-800/50 flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 0 0 6-6v-1.5m-6 7.5a6 6 0 0 1-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 0 1-3-3V4.5a3 3 0 1 1 6 0v8.25a3 3 0 0 1-3 3Z" />
-                </svg>
-              </div>
-              <p>Awaiting Command...</p>
+            <div className="absolute inset-0 flex flex-col items-center justify-center opacity-20 pointer-events-none">
+              <svg
+                className="w-24 h-24 mb-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1"
+              >
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+              </svg>
+              <p className="text-xs uppercase tracking-wider font-bold">
+                Enter a command to begin
+              </p>
             </div>
           )}
 
           {loading && (
-            <div className="text-indigo-400 animate-pulse">
-              &gt; Processing command...
-              <br />
-              &gt; analyzing_intent...
-              <br />
-              &gt; planning_steps...
+            <div className="space-y-2">
+              <p className="text-green-600 animate-pulse">
+                &gt; INITIALIZING AGENT...
+              </p>
+              <p className="text-green-600 animate-pulse [animation-delay:150ms]">
+                &gt; OBSERVING SCREEN...
+              </p>
+              <p className="text-green-600 animate-pulse [animation-delay:300ms]">
+                &gt; REASONING NEXT STEP...
+              </p>
+              <p className="text-green-600 animate-pulse [animation-delay:450ms]">
+                &gt; EXECUTING ACTIONS...
+              </p>
             </div>
           )}
 
           {response && (
             <div className="space-y-4">
-              <div className="text-slate-400 border-b border-slate-700/50 pb-2 mb-4">
-                &gt; Command Executed
+              <div className="flex items-center gap-2 pb-3 border-b-2 border-black">
+                <span className="text-black font-bold">// EXECUTION_LOG</span>
+                <span className="text-xs bg-black text-white px-2 py-0.5 font-bold">
+                  COMPLETE
+                </span>
               </div>
-              <pre className="whitespace-pre-wrap text-emerald-300 leading-relaxed">
+              <pre className="whitespace-pre-wrap font-medium text-neutral-800 leading-relaxed">
                 {response}
               </pre>
             </div>
           )}
-        </div>
+        </main>
 
-        {/* Input Area */}
-        <div className="mb-4">
-          <form onSubmit={runAgent} className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200"></div>
-            <div className="relative flex items-center glass-panel rounded-xl p-2 gap-2">
-              <input
-                id="cmd"
-                className="flex-1 bg-transparent border-none outline-none text-white px-4 py-3 placeholder-slate-500 text-lg"
-                placeholder="What should I do? (e.g. Open ChatGPT and ask 'Hello')"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                autoComplete="off"
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg font-semibold transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {loading ? (
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                ) : (
-                  <>Run</>
-                )}
-              </button>
-            </div>
+        {/* Input Bar */}
+        <div className="border-t-2 border-black bg-white p-4">
+          <form onSubmit={runAgent} className="flex gap-0 border-2 border-black relative">
+            {/* Voice Button */}
+            <button
+              type="button"
+              onClick={startListening}
+              className={`px-4 border-r-2 border-black hover:bg-neutral-100 transition-colors ${isListening ? 'bg-red-100 text-red-600 animate-pulse' : 'text-neutral-500'}`}
+              title="Voice Command"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            </button>
+
+            <input
+              className="flex-1 bg-transparent p-4 text-sm font-medium outline-none placeholder:text-neutral-400 font-sans"
+              placeholder={isListening ? "Listening..." : "Type instruction... (e.g., 'Open ChatGPT and ask what is AI')"}
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              autoComplete="off"
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !command.trim()}
+              className="px-8 bg-black text-white text-xs font-bold uppercase tracking-wider hover:bg-neutral-800 disabled:bg-neutral-300 disabled:text-neutral-500 disabled:cursor-not-allowed transition-all duration-200 border-l-2 border-black"
+            >
+              {loading ? "Running" : "Run"}
+            </button>
           </form>
         </div>
 
-      </main>
+        {/* Footer */}
+        <footer className="border-t-2 border-black p-3 text-center bg-white text-[10px] uppercase text-neutral-500 font-bold tracking-wider">
+          v1.1.0 // Android Agent System
+        </footer>
 
-      {/* Footer */}
-      <footer className="text-center text-slate-600 text-xs py-2">
-        Assign AI v1.0 • Connected to LocalHost:8000
-      </footer>
+      </div>
     </div>
   );
 }

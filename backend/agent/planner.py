@@ -1,94 +1,87 @@
-import openai
 import json
 import os
 import google.generativeai as genai
+import textwrap
 
-# Adapting to potentially use Gemini if OpenAI key is not present, or fallback.
-# User requested specifically OpenAI code, but I'll add logic to support Gemini if needed 
-# since the user might only have a Gemini Key based on previous context.
-# HOWEVER, strictly following user instructions for the provided code first.
+# Using Gemini by default as it is likely available given the user context,
+# but keeping the structure flexible.
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+import json
+import os
+import google.generativeai as genai
+import textwrap
 
-def plan(command: str):
-    # Check if we should use Gemini (if set in env and OpenAI is not)
+def get_next_action(user_command: str, screen_content: str, previous_actions: list):
+    """
+    Decides the next single action based on goal, screen, and history.
+    """
     gemini_key = os.getenv("GEMINI_API_KEY")
-    if not openai.api_key and gemini_key:
-        return plan_with_gemini(command, gemini_key)
+    if not gemini_key:
+        print("Warning: No API Key found.")
+        return {"action": "finish", "reason": "No API Key"}
 
-    prompt = f"""
-You are an AI mobile automation planner.
-
-User command:
-"{command}"
-
-Return a JSON array of steps.
-Example:
-[
-  {{ "action": "open_app", "app": "ChatGPT" }},
-  {{ "action": "authenticate_if_needed" }},
-  {{ "action": "type", "text": "What is the capital of France?" }},
-  {{ "action": "submit" }},
-  {{ "action": "extract_result" }}
-]
-"""
-
-    response = openai.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0
-    )
-
-    # Clean cleanup if markdown code blocks are present
-    content = response.choices[0].message.content
-    if content.startswith("```json"):
-        content = content.replace("```json", "").replace("```", "")
-    
-    return json.loads(content)
-
-def plan_with_gemini(command, api_key):
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        genai.configure(api_key=gemini_key)
+        # User requested gemini-2.5-flash
+        model = genai.GenerativeModel('gemini-2.5-flash')
         
-        prompt = f"""
-You are an AI mobile automation planner.
-Your goal is to break down a user command into specific, executable steps for an Android agent.
-
-User command: "{command}"
-
-**Rules:**
-1. Return ONLY a valid JSON array of steps. No markdown, no explanations.
-2. Allowed actions: "open_app", "authenticate_if_needed", "type", "submit", "extract_result".
-3. Extract the actual query text for the 'type' action. Do NOT type the full command like "Open app..."
-
-**Example:**
-Input: "Open ChatGPT and ask what is the capital of France"
-Output:
-[
-  {{ "action": "open_app", "app": "ChatGPT" }},
-  {{ "action": "authenticate_if_needed" }},
-  {{ "action": "type", "text": "What is the capital of France?" }},
-  {{ "action": "submit" }},
-  {{ "action": "extract_result" }}
-]
-"""
-        response = model.generate_content(prompt)
-        text = response.text
-        # Clean potential markdown wrapping
-        if text.startswith("```json"):
-            text = text.replace("```json", "").replace("```", "")
-        elif text.startswith("```"):
-            text = text.replace("```", "")
+        history_str = json.dumps(previous_actions, indent=2) if previous_actions else "None"
+        
+        prompt = textwrap.dedent(f"""
+            You are an intelligent Android Agent. Your goal is to complete the user's request by interacting with the screen.
             
+            **User Request:** "{user_command}"
+            
+            **Current Screen Elements (Simplified):**
+            {screen_content}
+            
+            **Action History:**
+            {history_str}
+            
+            **Instructions:**
+            1. Analyze the Screen Elements to find relevant buttons/inputs.
+            2. Decide the SINGLE next step to move closer to the goal.
+            3. If the goal is achieved or you are stuck, return action "finish".
+            4. If you need to wait for a page to load, return "wait".
+            
+            **Allowed Actions (JSON Format):**
+            - {{ "action": "open_app", "app": "package_name_or_common_name" }}
+            - {{ "action": "tap", "element_text": "text_on_screen" }}
+            - {{ "action": "type", "text": "text_to_type" }}
+            - {{ "action": "submit" }} (Variables: none)
+            - {{ "action": "home" }}
+            - {{ "action": "back" }}
+            - {{ "action": "wait", "seconds": 2 }}
+            - {{ "action": "finish", "reason": "explanation" }}
+
+            **Return ONLY a valid JSON object for the next step.**
+        """)
+        
+        response = model.generate_content(prompt)
+        text = response.text.strip()
+        
+        # Clean markdown
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.endswith("```"):
+            text = text[:-3]
+        if text.startswith("```"):
+            text = text[3:]
+
         return json.loads(text.strip())
+        
     except Exception as e:
-        print(f"Gemini API Error: {e}")
-        # Clean Fallback Plan
-        return [
-             { "action": "open_app", "app": "ChatGPT" },
-             { "action": "authenticate_if_needed" },
-             { "action": "type", "text": "What is the capital of France?" },
-             { "action": "submit" },
-             { "action": "extract_result" }
-        ]
+        error_str = str(e)
+        print(f"Gemini API Error: {error_str}")
+        
+        # Handle Rate Limits (429)
+        if "429" in error_str:
+            import re
+            # Extract wait time: "Please retry in 52.73s"
+            match = re.search(r"retry in (\d+(\.\d+)?)s", error_str)
+            wait_time = int(float(match.group(1))) + 2 if match else 60
+            
+            print(f"⚠️ Rate limit hit. Waiting for {wait_time} seconds...")
+            return {"action": "wait", "seconds": wait_time, "reason": "API Rate Limit"}
+            
+        return {"action": "wait", "seconds": 5, "error": error_str}
